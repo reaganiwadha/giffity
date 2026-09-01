@@ -24,3 +24,11 @@ export function closeDb(): void {
     db = null;
   }
 }
+
+/**
+ * Test-only: swap the process-wide connection for an in-memory database.
+ * Pass `null` to reset.
+ */
+export function setDbForTesting(instance: Database.Database | null): void {
+  db = instance;
+}

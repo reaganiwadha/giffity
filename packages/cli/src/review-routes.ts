@@ -12,6 +12,7 @@ import {
   type ThreadStatus,
 } from './threads.js';
 import { getCurrentSession } from './session.js';
+import { getSession } from './sessions.js';
 import { sendJson, sendError, withJsonBody } from './http-utils.js';
 
 export function handleReviewRoute(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL): boolean {
@@ -22,11 +23,13 @@ export function handleReviewRoute(req: IncomingMessage, res: ServerResponse, pat
   }
 
   if (pathname === '/api/threads' && req.method === 'GET') {
-    const sid = url.searchParams.get('session');
-    if (!sid) {
+    const sidParam = url.searchParams.get('session');
+    if (!sidParam) {
       sendError(res, 400, 'Missing session parameter');
       return true;
     }
+    // Accept either a session id or a session name.
+    const sid = getSession(sidParam)?.id ?? sidParam;
     const status = url.searchParams.get('status') as ThreadStatus | null;
     const threads = getThreadsForSession(sid, status || undefined);
     sendJson(res, threads);

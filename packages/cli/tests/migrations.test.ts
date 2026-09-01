@@ -46,7 +46,8 @@ describe('runMigrations', () => {
     const applied = db
       .prepare('SELECT version, name FROM schema_migrations ORDER BY version')
       .all() as { version: number; name: string }[];
-    expect(applied).toEqual([{ version: 1, name: 'baseline' }]);
+    expect(applied[0]).toEqual({ version: 1, name: 'baseline' });
+    expect(applied).toHaveLength(migrations.length);
 
     db.close();
   });
@@ -69,7 +70,7 @@ describe('runMigrations', () => {
     db.close();
   });
 
-  it('adopts a pre-existing legacy database at version 1 without data loss', () => {
+  it('brings a pre-existing legacy database up to date without data loss', () => {
     const db = new Database(':memory:');
     // Simulate a DB created by the old `migrateDb()` (no schema_migrations).
     migrations[0].up(db);
@@ -82,12 +83,18 @@ describe('runMigrations', () => {
     const version = db
       .prepare('SELECT MAX(version) AS v FROM schema_migrations')
       .get() as { v: number };
-    expect(version.v).toBe(1);
+    expect(version.v).toBe(migrations.length);
 
-    const session = db
+    // The legacy row is still readable, and migration 2 carried it into the
+    // new sessions table under the same id.
+    const legacy = db
       .prepare('SELECT ref FROM review_sessions WHERE id = ?')
       .get('s1') as { ref: string };
-    expect(session.ref).toBe('work');
+    expect(legacy.ref).toBe('work');
+    const migrated = db
+      .prepare('SELECT COUNT(*) AS c FROM sessions WHERE id = ?')
+      .get('s1') as { c: number };
+    expect(migrated.c).toBe(1);
 
     db.close();
   });

@@ -45,8 +45,10 @@ import {
   type PrComment,
 } from '@diffity/github';
 import { findOrCreateSession } from './session.js';
+import { getSession, sessionToLegacyRef, touchSession } from './sessions.js';
 import { createThread, addReply, getThreadsForSession } from './threads.js';
 import { handleReviewRoute } from './review-routes.js';
+import { handleSessionRoute } from './session-routes.js';
 import { handleTourRoute } from './tour-routes.js';
 import { sendJson, sendError, readBody } from './http-utils.js';
 import {
@@ -320,7 +322,14 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
         }
 
         if (pathname === '/api/diff') {
-          const ref = url.searchParams.get('ref');
+          const sessionParam = url.searchParams.get('session');
+          const sessionRef = sessionParam
+            ? (() => {
+                const s = getSession(sessionParam);
+                return s ? sessionToLegacyRef(s) : null;
+              })()
+            : null;
+          const ref = sessionRef ?? url.searchParams.get('ref');
           const whitespace = url.searchParams.get('whitespace');
           const extraArgs = whitespace === 'hide' ? ['-w'] : [];
           const baseRef = ref ? resolveBaseRef(ref) : 'HEAD';
@@ -348,7 +357,14 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
           const filePath = decodeURIComponent(
             pathname.slice('/api/file/'.length),
           );
-          const ref = url.searchParams.get('ref') || undefined;
+          const sessionParam = url.searchParams.get('session');
+          const sessionRef = sessionParam
+            ? (() => {
+                const s = getSession(sessionParam);
+                return s ? sessionToLegacyRef(s) : undefined;
+              })()
+            : undefined;
+          const ref = sessionRef ?? url.searchParams.get('ref') ?? undefined;
           const baseRef = ref ? resolveBaseRef(ref) : 'HEAD';
           try {
             const content = getFileContent(filePath, baseRef);
@@ -360,24 +376,41 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
         }
 
         if (pathname === '/api/info') {
-          const ref = url.searchParams.get('ref') || effectiveRef;
+          const sessionParam = url.searchParams.get('session');
+          const sessionRecord = sessionParam ? getSession(sessionParam) : null;
+          const ref = sessionRecord
+            ? sessionToLegacyRef(sessionRecord)
+            : url.searchParams.get('ref') || effectiveRef;
           const info = getRepoInfo();
           let refDescription =
             description || diffArgs.join(' ') || 'Unstaged changes';
-          if (url.searchParams.get('ref')) {
+          if (sessionRecord) {
+            refDescription =
+              sessionRecord.title || sessionRecord.name;
+          } else if (url.searchParams.get('ref')) {
             refDescription = descriptionForRef(url.searchParams.get('ref')!);
           }
           const capabilities = getRefCapabilities(ref);
-          let sessionId: string | null = null;
-          if (ref) {
-            const session = findOrCreateSession(ref);
-            sessionId = session.id;
+          let sessionId: string | null = sessionRecord?.id ?? null;
+          if (!sessionId && url.searchParams.get('ref')) {
+            // Compat: the pre-session UI passes ?ref= and expects a session id
+            // back so it can load review threads. Phase 2 switches it to
+            // ?session=.
+            sessionId = findOrCreateSession(url.searchParams.get('ref')!).id;
           }
           sendJson(res, {
             ...info,
             description: refDescription,
             capabilities,
             sessionId,
+            session: sessionRecord
+              ? {
+                  id: sessionRecord.id,
+                  name: sessionRecord.name,
+                  title: sessionRecord.title,
+                  lanes: sessionRecord.lanes,
+                }
+              : null,
             github: githubRemote,
             editor: editorAvailable,
           });
@@ -562,6 +595,10 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
           return;
         }
 
+        if (handleSessionRoute(req, res, pathname, url)) {
+          return;
+        }
+
         if (handleReviewRoute(req, res, pathname, url)) {
           return;
         }
@@ -611,7 +648,8 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
       const addr = server.address();
       if (addr && typeof addr !== 'string') {
         if (effectiveRef) {
-          findOrCreateSession(effectiveRef);
+          const launched = findOrCreateSession(effectiveRef);
+          touchSession(launched.id);
         }
         if (registryInfo) {
           registerInstance({

@@ -3,7 +3,12 @@ import { join, isAbsolute } from 'node:path';
 import type { Command } from 'commander';
 import pc from 'picocolors';
 import { isGitRepo, getDiffFiles, resolveRef, getRepoRoot } from '@diffity/git';
-import { getCurrentSession } from './session.js';
+import {
+  getCurrentSession,
+  getSession,
+  sessionToLegacyRef,
+  type SessionRecord,
+} from './sessions.js';
 import {
   createThread,
   getThreadsForSession,
@@ -15,19 +20,31 @@ import {
 } from './threads.js';
 import { createTour, addTourStep, updateTourStatus } from './tours.js';
 
-function requireSession() {
+function requireSession(sessionSelector?: string): SessionRecord {
   if (!isGitRepo()) {
     console.error(pc.red('Error: Not a git repository'));
     process.exit(1);
   }
 
-  const session = getCurrentSession();
+  const session = sessionSelector
+    ? getSession(sessionSelector)
+    : getCurrentSession();
   if (!session) {
-    console.error(pc.red('Error: No active review session.'));
-    console.error(pc.dim('Start diffity first to create a session.'));
+    if (sessionSelector) {
+      console.error(pc.red(`Error: Session not found: ${sessionSelector}`));
+    } else {
+      console.error(pc.red('Error: No active review session.'));
+      console.error(pc.dim('Start diffity first to create a session.'));
+    }
     process.exit(1);
   }
   return session;
+}
+
+/** The ref the agent commands operate on: a session's last diff pair. */
+function sessionRef(session: SessionRecord): string {
+  const ref = sessionToLegacyRef(session);
+  return ref === '__tree__' ? 'work' : ref;
 }
 
 function assertFileExists(filePath: string): void {
@@ -86,6 +103,8 @@ export function registerAgentCommands(program: Command): void {
   const agent = program
     .command('agent')
     .description('Agent commands for interacting with review comments')
+    .option('--session <id|name>', 'Target a specific session (default: most recently opened)')
+    .option('--author <name>', 'Author name for comments and replies', 'Agent')
     .addHelpText('after', `
 Examples:
   $ diffity agent list --status open --json
@@ -96,6 +115,12 @@ Examples:
   $ diffity agent tour-start --topic "How does auth work?" --body "Overview of the auth flow"
   $ diffity agent tour-step --tour <id> --file src/auth.ts --line 10 --body "Entry point"
   $ diffity agent tour-done --tour <id>`);
+
+  const agentSession = (): SessionRecord => requireSession(agent.opts().session);
+  const agentAuthor = () => ({
+    name: (agent.opts().author as string) || 'Agent',
+    type: 'agent' as const,
+  });
 
   agent
     .command('list')
@@ -108,7 +133,7 @@ Examples:
         console.error(pc.red(`Error: Invalid status "${opts.status}". Must be one of: ${validStatuses.join(', ')}`));
         process.exit(1);
       }
-      const session = requireSession();
+      const session = agentSession();
       const threads = getThreadsForSession(session.id, opts.status as ThreadStatus | undefined);
 
       if (opts.json) {
@@ -139,13 +164,14 @@ Examples:
         console.error(pc.red(`Error: Invalid side "${opts.side}". Must be "new" or "old"`));
         process.exit(1);
       }
-      const session = requireSession();
+      const session = agentSession();
       assertFileExists(opts.file);
-      if (session.ref !== '__tree__') {
-        const diffFiles = getDiffFiles(session.ref);
+      if (session.kind !== 'tree') {
+        const ref = sessionRef(session);
+        const diffFiles = getDiffFiles(ref);
         if (!diffFiles.includes(opts.file)) {
           console.error(pc.red(`Error: File "${opts.file}" is not in the current diff.`));
-          console.error(pc.dim(`The diff for ref "${session.ref}" contains ${diffFiles.length} file(s):`));
+          console.error(pc.dim(`The diff for "${session.name}" (${ref}) contains ${diffFiles.length} file(s):`));
           for (const f of diffFiles.slice(0, 20)) {
             console.error(pc.dim(`  ${f}`));
           }
@@ -163,7 +189,7 @@ Examples:
         opts.line,
         endLine,
         opts.body,
-        { name: 'Agent', type: 'agent' },
+        agentAuthor(),
       );
       console.log(pc.green(`Created thread ${thread.id.slice(0, 8)}`));
     });
@@ -174,9 +200,9 @@ Examples:
     .argument('<thread-id>', 'Thread ID (or 8-char prefix)')
     .option('--summary <text>', 'What was done to resolve it')
     .action((id: string, opts) => {
-      const session = requireSession();
+      const session = agentSession();
       const thread = resolveThreadId(id, session.id);
-      const author = opts.summary ? { name: 'Agent', type: 'agent' as const } : undefined;
+      const author = opts.summary ? agentAuthor() : undefined;
       updateThreadStatus(thread.id, 'resolved', opts.summary, author);
       console.log(pc.green(`Resolved thread ${thread.id.slice(0, 8)}`));
     });
@@ -187,9 +213,9 @@ Examples:
     .argument('<thread-id>', 'Thread ID (or 8-char prefix)')
     .option('--reason <text>', 'Why the thread is being dismissed')
     .action((id: string, opts) => {
-      const session = requireSession();
+      const session = agentSession();
       const thread = resolveThreadId(id, session.id);
-      const author = opts.reason ? { name: 'Agent', type: 'agent' as const } : undefined;
+      const author = opts.reason ? agentAuthor() : undefined;
       updateThreadStatus(thread.id, 'dismissed', opts.reason, author);
       console.log(pc.green(`Dismissed thread ${thread.id.slice(0, 8)}`));
     });
@@ -200,9 +226,9 @@ Examples:
     .argument('<thread-id>', 'Thread ID (or 8-char prefix)')
     .requiredOption('--body <text>', 'Reply body')
     .action((id: string, opts) => {
-      const session = requireSession();
+      const session = agentSession();
       const thread = resolveThreadId(id, session.id);
-      addReply(thread.id, opts.body, { name: 'Agent', type: 'agent' });
+      addReply(thread.id, opts.body, agentAuthor());
       console.log(pc.green(`Replied to thread ${thread.id.slice(0, 8)}`));
     });
 
@@ -211,7 +237,7 @@ Examples:
     .description('Create a general comment on the entire diff (not tied to a specific file or line)')
     .requiredOption('--body <text>', 'Comment body')
     .action((opts) => {
-      const session = requireSession();
+      const session = agentSession();
       const thread = createThread(
         session.id,
         '__general__',
@@ -219,7 +245,7 @@ Examples:
         0,
         0,
         opts.body,
-        { name: 'Agent', type: 'agent' },
+        agentAuthor(),
       );
       console.log(pc.green(`Created general comment ${thread.id.slice(0, 8)}`));
     });
@@ -228,9 +254,8 @@ Examples:
     .command('diff')
     .description('Output the unified diff for the current session (includes untracked files)')
     .action(() => {
-      const session = requireSession();
-      const ref = session.ref === '__tree__' ? 'work' : session.ref;
-      const raw = resolveRef(ref);
+      const session = agentSession();
+      const raw = resolveRef(sessionRef(session));
       if (!raw.trim()) {
         console.error(pc.dim('No diff content for current session.'));
         process.exit(0);
@@ -245,7 +270,7 @@ Examples:
     .option('--body <text>', 'Introductory text for the tour', '')
     .option('--json', 'Output as JSON')
     .action((opts) => {
-      const session = requireSession();
+      const session = agentSession();
       const tour = createTour(session.id, opts.topic, opts.body);
       if (opts.json) {
         console.log(JSON.stringify(tour, null, 2));
@@ -265,7 +290,7 @@ Examples:
     .option('--annotation <text>', 'Short inline annotation on highlighted code', '')
     .option('--json', 'Output as JSON')
     .action((opts) => {
-      requireSession();
+      agentSession();
       assertFileExists(opts.file);
       const endLine = opts.endLine ?? opts.line;
       const step = addTourStep(opts.tour, opts.file, opts.line, endLine, opts.body, opts.annotation);
@@ -282,7 +307,7 @@ Examples:
     .requiredOption('--tour <id>', 'Tour ID')
     .option('--json', 'Output as JSON')
     .action((opts) => {
-      requireSession();
+      agentSession();
       updateTourStatus(opts.tour, 'ready');
       if (opts.json) {
         console.log(JSON.stringify({ ok: true }));

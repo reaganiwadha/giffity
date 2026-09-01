@@ -1,48 +1,34 @@
-import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { getHeadHash, getDiffityDir } from '@diffity/git';
-import { getDb } from './db.js';
+import { getHeadHash } from '@diffity/git';
+import { refToLanes } from './lanes.js';
+import {
+  findOrCreateSessionByLanes,
+  getCurrentSession as getCurrentSessionRecord,
+} from './sessions.js';
 
+/**
+ * Legacy single-ref session shape. Kept as a thin compatibility layer over the
+ * lane-based session model (see `sessions.ts`) so `server.ts` and the
+ * `/api/sessions/current` route keep working during the transition.
+ */
 export interface Session {
   id: string;
   ref: string;
   headHash: string;
 }
 
-function sessionFilePath(): string {
-  return join(getDiffityDir(), 'current-session');
-}
-
 export function findOrCreateSession(ref: string): Session {
-  const db = getDb();
-  const headHash = getHeadHash();
-
-  const existing = db.prepare(
-    'SELECT id, ref, head_hash FROM review_sessions WHERE ref = ? AND head_hash = ?'
-  ).get(ref, headHash) as { id: string; ref: string; head_hash: string } | undefined;
-
-  if (existing) {
-    const session: Session = { id: existing.id, ref: existing.ref, headHash: existing.head_hash };
-    writeFileSync(sessionFilePath(), JSON.stringify(session));
-    return session;
-  }
-
-  const id = randomUUID();
-  db.prepare(
-    'INSERT INTO review_sessions (id, ref, head_hash) VALUES (?, ?, ?)'
-  ).run(id, ref, headHash);
-
-  const session: Session = { id, ref, headHash };
-  writeFileSync(sessionFilePath(), JSON.stringify(session));
-  return session;
+  const isTree = ref === '__tree__';
+  const record = findOrCreateSessionByLanes(
+    isTree ? [] : refToLanes(ref),
+    isTree ? { kind: 'tree' } : undefined,
+  );
+  return { id: record.id, ref, headHash: getHeadHash() };
 }
 
 export function getCurrentSession(): Session | null {
-  try {
-    const raw = readFileSync(sessionFilePath(), 'utf-8');
-    return JSON.parse(raw) as Session;
-  } catch {
+  const record = getCurrentSessionRecord();
+  if (!record) {
     return null;
   }
+  return { id: record.id, ref: record.laneSig, headHash: getHeadHash() };
 }
