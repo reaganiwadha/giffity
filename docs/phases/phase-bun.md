@@ -25,8 +25,11 @@ early. Node remains the primary dev/test runtime; Bun is a packaging target only
   a generated `packages/cli/src/generated/version.ts` (written by
   `packages/cli/build.ts`).
 - `doctor` no longer uses `createRequire`.
-- `install.sh` / `install.ps1` — ensure bun, `npm install`, `bun run build-bun`,
-  copy the binary to `~/.local/bin` / `%LOCALAPPDATA%\Programs\giffity`.
+- `bun run install-local` (`scripts/install-local.ts`) — build the binary and
+  copy it to `~/.local/bin` / `%LOCALAPPDATA%\Programs\giffity` (override with
+  `GIFFITY_BIN_DIR`). `install.sh` / `install.ps1` just ensure bun +
+  `npm install` then call it. `build-bun.ts` exports `buildBinary()` so nothing
+  shells `bun` inside `bun`.
 
 ## Verified
 

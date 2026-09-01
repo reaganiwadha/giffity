@@ -18,6 +18,7 @@
     "link-dev": "tsx scripts/link-dev.ts",
     "dev": "tsx scripts/dev.ts",
     "build-bun": "bun scripts/build-bun.ts",
+    "install-local": "bun scripts/install-local.ts",
     "release:patch": "npm run build && tsx scripts/release.ts patch && npm publish -w packages/cli",
     "release:minor": "npm run build && tsx scripts/release.ts minor && npm publish -w packages/cli"
   },

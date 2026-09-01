@@ -12,15 +12,4 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 npm install
-bun run build-bun
-
-DEST="${GIFFITY_BIN_DIR:-$HOME/.local/bin}"
-mkdir -p "$DEST"
-install -m 0755 dist-bin/giffity "$DEST/giffity"
-
-echo
-echo "Installed giffity -> $DEST/giffity"
-case ":$PATH:" in
-  *":$DEST:"*) ;;
-  *) echo "Add $DEST to your PATH to use \`giffity\` directly." ;;
-esac
+bun run install-local
