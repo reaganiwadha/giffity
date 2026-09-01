@@ -7,6 +7,7 @@ export function useReviewThreads(sessionId: string | null | undefined) {
     queryKey: ['threads', sessionId],
     queryFn: () => fetchThreads(sessionId!),
     enabled: !!sessionId,
-    refetchInterval: 2000,
+    // Live updates now arrive via SSE (use-session-events); no polling.
+    refetchInterval: false,
   });
 }

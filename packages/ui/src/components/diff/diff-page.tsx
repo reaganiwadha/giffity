@@ -15,6 +15,7 @@ import { StaleDiffBanner } from '../layout/stale-diff-banner';
 import { CheckCircleIcon } from '../icons/check-circle-icon';
 import { PageLoader } from '../layout/skeleton';
 import { useDiffStaleness } from '../../hooks/use-diff-staleness';
+import { useSessionEvents } from '../../hooks/use-session-events';
 import { type ViewMode, getFilePath, getAutoCollapsedPaths } from '../../lib/diff-utils';
 import { buildFirstOpenThreadByFile, buildThreadCountsByFile } from '../../lib/comment-navigation';
 import { getHunkHeaders, scrollToElement } from '../../lib/dom-utils';
@@ -49,7 +50,16 @@ export function DiffPage() {
   const reviewsEnabled = !!info?.capabilities?.reviews;
   const sessionId = info?.sessionId ?? null;
   const canRevert = !!info?.capabilities?.revert;
-  const { isStale, resetStaleness } = useDiffStaleness(refParam, !!info?.capabilities?.staleness);
+  const staleRef = useRef<() => void>(() => {});
+  const { connected: sseConnected } = useSessionEvents(sessionId, {
+    onDiffStale: () => staleRef.current(),
+  });
+  const { isStale, resetStaleness, markStale } = useDiffStaleness(
+    refParam,
+    !!info?.capabilities?.staleness,
+    !sseConnected,
+  );
+  staleRef.current = markStale;
   const [githubDetails, setGithubDetails] = useState<GitHubDetails | null>(null);
 
   useEffect(() => {

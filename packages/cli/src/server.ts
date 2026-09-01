@@ -55,6 +55,8 @@ import {
 } from './sessions.js';
 import { activateSession } from './session-routes.js';
 import { refToLanes } from './lanes.js';
+import { subscribe } from './events.js';
+import { startDiffWatcher } from './diff-watcher.js';
 import { createThread, addReply, getThreadsForSession } from './threads.js';
 import { handleReviewRoute } from './review-routes.js';
 import { handleSessionRoute } from './session-routes.js';
@@ -243,6 +245,34 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
         if (req.method === 'OPTIONS') {
           res.writeHead(204);
           res.end();
+          return;
+        }
+
+        if (pathname === '/api/events' && req.method === 'GET') {
+          const sessionId = url.searchParams.get('session');
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache, no-transform',
+            Connection: 'keep-alive',
+            'X-Accel-Buffering': 'no',
+          });
+          res.write('retry: 3000\n\n');
+          const safeWrite = (chunk: string) => {
+            try {
+              res.write(chunk);
+            } catch {
+              /* connection gone */
+            }
+          };
+          const unsubscribe = subscribe(sessionId, (evt) => {
+            safeWrite(`data: ${JSON.stringify(evt)}\n\n`);
+          });
+          const heartbeat = setInterval(() => safeWrite(': ping\n\n'), 15000);
+          heartbeat.unref?.();
+          req.on('close', () => {
+            clearInterval(heartbeat);
+            unsubscribe();
+          });
           return;
         }
 
@@ -685,7 +715,10 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
     },
   );
 
+  const stopDiffWatcher = startDiffWatcher();
+
   const closeFn = () => {
+    stopDiffWatcher();
     deregisterInstance(process.pid);
     server.close();
   };

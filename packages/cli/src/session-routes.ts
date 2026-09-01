@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isValidGitRef } from '@diffity/git';
 import { getDb } from './db.js';
+import { publish } from './events.js';
 import { isWorkingTreeLaneRef, type LaneInput } from './lanes.js';
 import { updateInstance } from './registry.js';
 import {
@@ -120,6 +121,7 @@ export function handleSessionRoute(
         name: typeof body.name === 'string' ? body.name : undefined,
         title: typeof body.title === 'string' ? body.title : undefined,
       });
+      publish({ type: 'session:created', sessionId: session.id });
       activateSession(session);
       sendJson(res, {
         id: session.id,
@@ -149,6 +151,7 @@ export function handleSessionRoute(
         name: typeof body.name === 'string' ? body.name : undefined,
         title: typeof body.title === 'string' ? body.title : undefined,
       });
+      publish({ type: 'session:created', sessionId: session.id });
       sendJson(res, withCounts(session));
     });
     return true;
@@ -184,6 +187,7 @@ export function handleSessionRoute(
             return;
           }
           current = setSessionLanes(current.id, lanes);
+          publish({ type: 'session:lanes-changed', sessionId: current.id });
         }
         if (
           typeof body.name === 'string' ||
@@ -197,6 +201,7 @@ export function handleSessionRoute(
         if (typeof body.archived === 'boolean') {
           archiveSession(current.id, body.archived);
           current = getSession(current.id)!;
+          publish({ type: 'session:archived', sessionId: current.id });
         }
         sendJson(res, withCounts(current));
       });
@@ -214,6 +219,7 @@ export function handleSessionRoute(
       } else {
         archiveSession(session.id, true);
       }
+      publish({ type: 'session:archived', sessionId: session.id });
       sendJson(res, { ok: true });
       return true;
     }

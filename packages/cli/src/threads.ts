@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db.js';
+import { publish } from './events.js';
 import { unescapeMarkdown } from './unescape.js';
+
+function sessionIdForThread(threadId: string): string | undefined {
+  const row = getDb()
+    .prepare('SELECT session_id FROM comment_threads WHERE id = ?')
+    .get(threadId) as { session_id: string } | undefined;
+  return row?.session_id;
+}
 
 export interface ThreadAuthor {
   name: string;
@@ -126,6 +134,8 @@ export function createThread(
     'INSERT INTO comments (id, thread_id, author_name, author_type, body, created_at) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(commentId, threadId, author.name, author.type, cleanBody, now);
 
+  publish({ type: 'thread:created', sessionId });
+
   return {
     id: threadId,
     sessionId,
@@ -225,6 +235,8 @@ export function addReply(threadId: string, body: string, author: ThreadAuthor): 
     ).run(now, threadId);
   }
 
+  publish({ type: 'comment:added', sessionId: sessionIdForThread(threadId) });
+
   return {
     id: commentId,
     author,
@@ -248,21 +260,27 @@ export function updateThreadStatus(threadId: string, status: ThreadStatus, summa
       'INSERT INTO comments (id, thread_id, author_name, author_type, body, created_at) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(commentId, threadId, summaryAuthor.name, summaryAuthor.type, cleanSummary, now);
   }
+
+  publish({ type: 'thread:updated', sessionId: sessionIdForThread(threadId) });
 }
 
 export function deleteThread(threadId: string): void {
   const db = getDb();
+  const sessionId = sessionIdForThread(threadId);
   db.prepare('DELETE FROM comment_threads WHERE id = ?').run(threadId);
+  publish({ type: 'thread:deleted', sessionId });
 }
 
 export function deleteAllThreadsForSession(sessionId: string): void {
   const db = getDb();
   db.prepare('DELETE FROM comment_threads WHERE session_id = ?').run(sessionId);
+  publish({ type: 'thread:deleted', sessionId });
 }
 
 export function editComment(commentId: string, body: string): void {
   const db = getDb();
   db.prepare('UPDATE comments SET body = ? WHERE id = ?').run(unescapeMarkdown(body), commentId);
+  publish({ type: 'thread:updated' });
 }
 
 export function deleteComment(commentId: string): void {
@@ -272,10 +290,12 @@ export function deleteComment(commentId: string): void {
     return;
   }
 
+  const sessionId = sessionIdForThread(comment.thread_id);
   db.prepare('DELETE FROM comments WHERE id = ?').run(commentId);
 
   const remaining = db.prepare('SELECT COUNT(*) as count FROM comments WHERE thread_id = ?').get(comment.thread_id) as { count: number };
   if (remaining.count === 0) {
     db.prepare('DELETE FROM comment_threads WHERE id = ?').run(comment.thread_id);
   }
+  publish({ type: 'thread:updated', sessionId });
 }
