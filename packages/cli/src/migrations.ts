@@ -117,7 +117,7 @@ export const migrations: Migration[] = [
 
       const insertSession = db.prepare(
         `INSERT INTO sessions (id, name, title, auto_named, lane_sig, kind, created_at, last_opened_at, archived)
-         VALUES (@id, @name, NULL, 1, @lane_sig, @kind, @created_at, @created_at, 0)`,
+         VALUES (?, ?, NULL, 1, ?, ?, ?, ?, 0)`,
       );
       const insertLane = db.prepare(
         'INSERT INTO session_lanes (session_id, position, ref, label) VALUES (?, ?, ?, ?)',
@@ -137,13 +137,14 @@ export const migrations: Migration[] = [
       for (const row of legacy) {
         const lanes = refToLanes(row.ref);
         const kind = lanes.length === 0 ? 'tree' : 'diff';
-        insertSession.run({
-          id: row.id,
-          name: uniqueName(autoName(lanes)),
-          lane_sig: laneSig(lanes),
+        insertSession.run(
+          row.id,
+          uniqueName(autoName(lanes)),
+          laneSig(lanes),
           kind,
-          created_at: row.created_at,
-        });
+          row.created_at,
+          row.created_at,
+        );
         lanes.forEach((lane, i) => {
           insertLane.run(row.id, i, lane.ref, lane.label ?? null);
         });

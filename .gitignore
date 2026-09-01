@@ -5,6 +5,7 @@ tmp
 snapshot-*
 .playwright-mcp
 dist/
+dist-bin/
 *.tsbuildinfo
 .DS_Store
 *.local

@@ -17,6 +17,7 @@
     "test": "npm run test -w @diffity/git && npm run test -w @diffity/parser && npm run test -w diffity && npm run test -w @diffity/ui",
     "link-dev": "tsx scripts/link-dev.ts",
     "dev": "tsx scripts/dev.ts",
+    "build-bun": "bun scripts/build-bun.ts",
     "release:patch": "npm run build && tsx scripts/release.ts patch && npm publish -w packages/cli",
     "release:minor": "npm run build && tsx scripts/release.ts minor && npm publish -w packages/cli"
   },

@@ -1,10 +1,8 @@
 import type { Command } from 'commander';
 import { execSync } from 'node:child_process';
-import { createRequire } from 'node:module';
+import Database from 'better-sqlite3';
 import pc from 'picocolors';
 import { isGitRepo } from '@diffity/git';
-
-const require = createRequire(import.meta.url);
 
 export function registerDoctorCommand(program: Command, version: string) {
   program
@@ -34,7 +32,7 @@ export function registerDoctorCommand(program: Command, version: string) {
 
       process.stdout.write('  sqlite       ');
       try {
-        require('better-sqlite3');
+        new Database(':memory:').close();
         console.log(pc.green('✓ better-sqlite3 loaded'));
       } catch {
         console.log(pc.red('✗ better-sqlite3 failed to load (native module issue)'));

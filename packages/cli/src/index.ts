@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
 import open from 'open';
 import pc from 'picocolors';
 import { isGitRepo, isValidGitRef, getRepoRoot, getRepoName, normalizeRef, WORKING_TREE_REFS } from '@diffity/git';
@@ -24,9 +23,9 @@ import { registerDoctorCommand } from './commands/doctor.js';
 import { registerTreeCommand } from './commands/tree.js';
 import { registerKillCommand } from './commands/kill.js';
 import { SKILLS_HASH } from './generated/skills-hash.js';
+import { VERSION } from './generated/version.js';
 
-const require = createRequire(import.meta.url);
-const pkg = require('../package.json');
+const pkg = { version: VERSION };
 
 const program = new Command();
 

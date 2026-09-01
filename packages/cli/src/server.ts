@@ -52,6 +52,11 @@ import { handleSessionRoute } from './session-routes.js';
 import { handleTourRoute } from './tour-routes.js';
 import { sendJson, sendError, readBody } from './http-utils.js';
 import {
+  ensureEmbeddedAssets,
+  hasEmbeddedAssets,
+  readEmbeddedAsset,
+} from './assets.js';
+import {
   registerInstance,
   deregisterInstance
 } from './registry.js';
@@ -102,6 +107,40 @@ function serveStatic(res: ServerResponse, filePath: string) {
   const content = readFileSync(filePath);
   res.writeHead(200, { 'Content-Type': mime });
   res.end(content);
+}
+
+/**
+ * Serves a UI file, preferring assets embedded in the compiled Bun binary and
+ * falling back to `dist/ui/client` on disk. `urlPath` is the request pathname
+ * ('/' is normalized to '/index.html'); unknown paths fall back to the SPA
+ * shell.
+ */
+async function serveUi(
+  res: ServerResponse,
+  uiDir: string,
+  urlPath: string,
+): Promise<void> {
+  const normalized = urlPath === '/' ? '/index.html' : urlPath;
+  await ensureEmbeddedAssets();
+
+  if (hasEmbeddedAssets()) {
+    const key = (await readEmbeddedAsset(normalized))
+      ? normalized
+      : '/index.html';
+    const data = await readEmbeddedAsset(key);
+    if (data) {
+      const mime = MIME_TYPES[extname(key)] || 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': mime });
+      res.end(Buffer.from(data));
+      return;
+    }
+  }
+
+  let filePath = join(uiDir, normalized.slice(1));
+  if (!existsSync(filePath)) {
+    filePath = join(uiDir, 'index.html');
+  }
+  serveStatic(res, filePath);
 }
 
 function descriptionForRef(ref: string): string {
@@ -165,6 +204,7 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
 
   const githubRemote = detectGitHubRemote();
   const uiDir = join(__dirname, 'ui/client');
+  void ensureEmbeddedAssets();
 
   let editorAvailable: 'vscode' | null = null;
   try {
@@ -607,11 +647,7 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
           return;
         }
 
-        let filePath = join(uiDir, pathname === '/' ? 'index.html' : pathname);
-        if (!existsSync(filePath)) {
-          filePath = join(uiDir, 'index.html');
-        }
-        serveStatic(res, filePath);
+        await serveUi(res, uiDir, pathname);
       } catch (err) {
         if (!res.headersSent) {
           sendError(res, 500, `${err instanceof Error ? err.message : err}`);
