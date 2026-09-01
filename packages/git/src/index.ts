@@ -5,5 +5,7 @@ export { getDiff, getDiffFiles, getDiffStat, getDiffStatForRef, getUntrackedFile
 export type { RefDiffArgs } from './diff.js';
 export { getStagedFiles, getUnstagedFiles, isDirty } from './status.js';
 export { getRecentCommits } from './commits.js';
+export { getBranches, getTags, getHeadInfo } from './refs.js';
+export type { BranchRef, HeadInfo } from './refs.js';
 export { getTree, getTreeEntries, getTreeFingerprint, getWorkingTreeFileContent, getWorkingTreeRawFile } from './tree.js';
 export type { TreeEntry } from './tree.js';

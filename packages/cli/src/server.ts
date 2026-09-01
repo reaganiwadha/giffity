@@ -21,6 +21,9 @@ import {
   getStagedFiles,
   getUnstagedFiles,
   getRecentCommits,
+  getBranches,
+  getTags,
+  getHeadInfo,
   getFileLineCount,
   resolveBaseRef,
   resolveDiffArgs,
@@ -45,7 +48,13 @@ import {
   type PrComment,
 } from '@diffity/github';
 import { findOrCreateSession } from './session.js';
-import { getSession, sessionToLegacyRef, touchSession } from './sessions.js';
+import {
+  findOrCreateSessionByLanes,
+  getSession,
+  sessionToLegacyRef,
+} from './sessions.js';
+import { activateSession } from './session-routes.js';
+import { refToLanes } from './lanes.js';
 import { createThread, addReply, getThreadsForSession } from './threads.js';
 import { handleReviewRoute } from './review-routes.js';
 import { handleSessionRoute } from './session-routes.js';
@@ -89,6 +98,7 @@ interface ServerOptions {
   diffArgs: string[];
   description?: string;
   effectiveRef?: string;
+  initialLanes?: { ref: string; label?: string }[];
   version?: string;
   registryInfo?: {
     repoRoot: string;
@@ -161,6 +171,8 @@ function descriptionForRef(ref: string): string {
 
 interface ServerResult {
   port: number;
+  sessionId: string | null;
+  sessionUrl: string;
   close: () => void;
 }
 
@@ -171,6 +183,7 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
     diffArgs,
     description,
     effectiveRef,
+    initialLanes,
     version,
     registryInfo,
   } = options;
@@ -316,6 +329,21 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
           return;
         }
 
+        if (pathname === '/api/refs') {
+          try {
+            sendJson(res, {
+              head: getHeadInfo(),
+              branches: getBranches(),
+              tags: getTags(),
+              recentCommits: getRecentCommits({ count: 30 }),
+              workingTreeRefs: ['work', 'staged', 'unstaged'],
+            });
+          } catch (err) {
+            sendError(res, 500, `Failed to get refs: ${err}`);
+          }
+          return;
+        }
+
         if (pathname === '/api/commits') {
           const count = parseInt(url.searchParams.get('count') || '10', 10);
           const skip = parseInt(url.searchParams.get('skip') || '0', 10);
@@ -441,6 +469,7 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
           sendJson(res, {
             ...info,
             description: refDescription,
+            ref,
             capabilities,
             sessionId,
             session: sessionRecord
@@ -683,10 +712,15 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
     server.on('listening', () => {
       const addr = server.address();
       if (addr && typeof addr !== 'string') {
-        if (effectiveRef) {
-          const launched = findOrCreateSession(effectiveRef);
-          touchSession(launched.id);
-        }
+        const lanes =
+          initialLanes && initialLanes.length >= 2
+            ? initialLanes
+            : effectiveRef
+              ? refToLanes(effectiveRef)
+              : [];
+        const launched =
+          lanes.length >= 2 ? findOrCreateSessionByLanes(lanes) : null;
+
         if (registryInfo) {
           registerInstance({
             pid: process.pid,
@@ -695,12 +729,29 @@ export function startServer(options: ServerOptions): Promise<ServerResult> {
             repoHash: registryInfo.repoHash,
             repoName: registryInfo.repoName,
             ref: effectiveRef || 'work',
-            description: description || 'Unstaged changes',
+            description:
+              launched?.title || launched?.name || description || 'Unstaged changes',
             startedAt: new Date().toISOString(),
             version,
+            activeSessionId: launched?.id,
+            activeSessionName: launched?.name,
           });
         }
-        resolve({ port: addr.port, close: closeFn });
+
+        if (launched) {
+          activateSession(launched);
+        }
+
+        resolve({
+          port: addr.port,
+          sessionId: launched?.id ?? null,
+          sessionUrl: launched
+            ? `/diff?session=${encodeURIComponent(launched.id)}`
+            : effectiveRef
+              ? `/diff?ref=${encodeURIComponent(effectiveRef)}`
+              : '/diff',
+          close: closeFn,
+        });
       }
     });
 

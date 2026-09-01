@@ -1,7 +1,7 @@
 import { redirect } from "react-router";
 
 export function clientLoader() {
-  throw redirect("/diff");
+  throw redirect("/sessions");
 }
 
 export default function Index() {

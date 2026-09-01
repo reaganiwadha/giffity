@@ -23,8 +23,9 @@ import type { LineSelection } from '../comments/types';
 import { isThreadResolved } from '../comments/types';
 
 export function DiffPage() {
-  const { ref: refParam, theme: initialTheme, view: initialViewMode } = useLoaderData<{
+  const { ref: refParam, sessionId: sessionParam, theme: initialTheme, view: initialViewMode } = useLoaderData<{
     ref: string;
+    sessionId?: string;
     theme: 'light' | 'dark' | null;
     view: 'split' | 'unified' | null;
   }>();
@@ -34,7 +35,7 @@ export function DiffPage() {
   const [showHelp, setShowHelp] = useState(false);
   const { theme, toggleTheme } = useTheme(initialTheme);
   const { data: diff, error } = useDiff(hideWhitespace, refParam);
-  const { data: info } = useInfo(refParam);
+  const { data: info } = useInfo(sessionParam ? undefined : refParam, sessionParam);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set());
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());

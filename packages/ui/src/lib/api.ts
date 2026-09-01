@@ -46,15 +46,57 @@ export interface GitHubDetails {
   commentCount: number;
 }
 
+export interface SessionLane {
+  position: number;
+  ref: string;
+  label: string | null;
+}
+
+export interface SessionSummary {
+  id: string;
+  name: string;
+  title: string | null;
+  autoNamed: boolean;
+  laneSig: string;
+  kind: 'diff' | 'tree';
+  createdAt: string;
+  lastOpenedAt: string;
+  archived: boolean;
+  lanes: SessionLane[];
+  openThreadCount: number;
+  totalThreadCount: number;
+}
+
 export interface RepoInfo {
   name: string;
   branch: string;
   root: string;
   description: string;
+  ref?: string;
   capabilities?: { reviews: boolean; revert: boolean; staleness: boolean };
   sessionId?: string | null;
+  session?: {
+    id: string;
+    name: string;
+    title: string | null;
+    lanes: SessionLane[];
+  } | null;
   github?: GitHubRemote | null;
   editor?: 'vscode' | null;
+}
+
+export interface BranchRef {
+  name: string;
+  isCurrent: boolean;
+  upstream: string | null;
+}
+
+export interface RefsResponse {
+  head: { branch: string; hash: string; shortHash: string; detached: boolean };
+  branches: BranchRef[];
+  tags: string[];
+  recentCommits: Commit[];
+  workingTreeRefs: string[];
 }
 
 export interface Commit {
@@ -90,8 +132,65 @@ export async function fetchDiffFingerprint(ref?: string): Promise<string> {
   return json.fingerprint;
 }
 
-export function fetchRepoInfo(ref?: string): Promise<RepoInfo> {
-  return apiFetch(buildUrl('/api/info', { ref }));
+export function fetchRepoInfo(ref?: string, session?: string): Promise<RepoInfo> {
+  return apiFetch(buildUrl('/api/info', { ref, session }));
+}
+
+export function fetchRefs(): Promise<RefsResponse> {
+  return apiFetch('/api/refs');
+}
+
+export function fetchSessions(includeArchived = false): Promise<SessionSummary[]> {
+  return apiFetch<{ sessions: SessionSummary[] }>(
+    buildUrl('/api/sessions', { archived: includeArchived ? '1' : undefined }),
+  ).then((r) => r.sessions);
+}
+
+export function fetchSessionById(id: string): Promise<SessionSummary> {
+  return apiFetch(`/api/sessions/${encodeURIComponent(id)}`);
+}
+
+export function createSession(data: {
+  lanes: { ref: string; label?: string }[];
+  name?: string;
+  title?: string;
+}): Promise<SessionSummary> {
+  return apiFetch('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateSession(
+  id: string,
+  patch: {
+    lanes?: { ref: string; label?: string }[];
+    name?: string;
+    title?: string;
+    archived?: boolean;
+  },
+): Promise<SessionSummary> {
+  return apiFetch(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export function archiveSession(id: string): Promise<void> {
+  return apiVoid(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function openSession(
+  lanes: { ref: string; label?: string }[],
+  extra?: { name?: string; title?: string },
+): Promise<{ id: string; name: string; url: string }> {
+  return apiFetch('/api/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'open-session', lanes, ...extra }),
+  });
 }
 
 export function openInEditor(filePath: string, line?: number): Promise<{ ok: boolean }> {

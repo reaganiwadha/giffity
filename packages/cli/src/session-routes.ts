@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isValidGitRef } from '@diffity/git';
 import { getDb } from './db.js';
 import { isWorkingTreeLaneRef, type LaneInput } from './lanes.js';
+import { updateInstance } from './registry.js';
 import {
   archiveSession,
   deleteSession,
@@ -87,12 +88,48 @@ function normalizeLaneInput(raw: unknown): LaneInput[] {
   });
 }
 
+/** Marks a session as the instance's active one (registry + last_opened_at). */
+export function activateSession(session: SessionRecord): void {
+  touchSession(session.id);
+  updateInstance(process.pid, {
+    activeSessionId: session.id,
+    activeSessionName: session.name,
+    description: session.title || session.name,
+  });
+}
+
 export function handleSessionRoute(
   req: IncomingMessage,
   res: ServerResponse,
   pathname: string,
   url: URL,
 ): boolean {
+  if (pathname === '/api/control' && req.method === 'POST') {
+    withJsonBody(res, req, 'Failed to run control action', (body) => {
+      if (body.action !== 'open-session') {
+        sendError(res, 400, `Unknown control action: ${String(body.action)}`);
+        return;
+      }
+      const lanes = normalizeLaneInput(body.lanes);
+      const err = validateLanes(lanes);
+      if (err) {
+        sendError(res, 400, err);
+        return;
+      }
+      const session = findOrCreateSessionByLanes(lanes, {
+        name: typeof body.name === 'string' ? body.name : undefined,
+        title: typeof body.title === 'string' ? body.title : undefined,
+      });
+      activateSession(session);
+      sendJson(res, {
+        id: session.id,
+        name: session.name,
+        url: `/diff?session=${encodeURIComponent(session.id)}`,
+      });
+    });
+    return true;
+  }
+
   if (pathname === '/api/sessions' && req.method === 'GET') {
     const includeArchived = url.searchParams.get('archived') === '1';
     const sessions = listSessions({ includeArchived }).map(withCounts);

@@ -13,6 +13,8 @@ export interface RegistryEntry {
   description: string;
   startedAt: string;
   version?: string;
+  activeSessionId?: string;
+  activeSessionName?: string;
 }
 
 const DIFFITY_DIR = join(homedir(), '.diffity');
@@ -122,6 +124,25 @@ export function registerInstance(entry: RegistryEntry): void {
     const filtered = entries.filter((e) => e.pid !== entry.pid);
     filtered.push(entry);
     writeRegistryRaw(filtered);
+  });
+}
+
+export function updateInstance(
+  pid: number,
+  patch: Partial<RegistryEntry>,
+): void {
+  withLock(() => {
+    const entries = readRegistryRaw();
+    let changed = false;
+    for (const entry of entries) {
+      if (entry.pid === pid) {
+        Object.assign(entry, patch);
+        changed = true;
+      }
+    }
+    if (changed) {
+      writeRegistryRaw(entries);
+    }
   });
 }
 

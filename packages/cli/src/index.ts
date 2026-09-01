@@ -13,6 +13,7 @@ import {
   detectRemote,
 } from '@diffity/github';
 import { startServer, getHost } from './server.js';
+import { refToLanes } from './lanes.js';
 import { registerAgentCommands } from './agent.js';
 import { findInstanceForRepo, findAvailablePort, deregisterInstance, killInstance, checkInstanceHealth } from './registry.js';
 import { registerOpenCommand } from './commands/open.js';
@@ -22,6 +23,7 @@ import { registerUpdateCommand } from './commands/update.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerTreeCommand } from './commands/tree.js';
 import { registerKillCommand } from './commands/kill.js';
+import { registerSessionsCommand } from './commands/sessions.js';
 import { SKILLS_HASH } from './generated/skills-hash.js';
 import { VERSION } from './generated/version.js';
 
@@ -227,6 +229,17 @@ range syntax (main..feature, main...feature) also work.`)
       effectiveRef = 'work';
     }
 
+    const lanes = refToLanes(effectiveRef);
+
+    function withViewParams(path: string): string {
+      const sep = path.includes('?') ? '&' : '?';
+      const extra = new URLSearchParams();
+      if (opts.dark) extra.set('theme', 'dark');
+      if (opts.unified) extra.set('view', 'unified');
+      const suffix = extra.toString();
+      return suffix ? `${path}${sep}${suffix}` : path;
+    }
+
     const repoRoot = getRepoRoot();
     const repoHash = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12);
     const repoName = getRepoName();
@@ -243,19 +256,36 @@ range syntax (main..feature, main...feature) also work.`)
           console.log(pc.dim(`  Stopped existing instance (pid ${existing.pid})`));
         }
       } else {
-        const urlParams = new URLSearchParams({ ref: effectiveRef });
-        if (opts.dark) {
-          urlParams.set('theme', 'dark');
+        // An instance is already running for this repo — tell it to open (or
+        // create) a session for these lanes instead of spawning a second one.
+        let relUrl = `/diff?ref=${encodeURIComponent(effectiveRef)}`;
+        if (lanes.length >= 2) {
+          try {
+            const controlRes = await fetch(
+              `http://localhost:${existing.port}/api/control`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'open-session', lanes }),
+              },
+            );
+            if (controlRes.ok) {
+              relUrl = ((await controlRes.json()) as { url: string }).url;
+            } else if (!opts.quiet) {
+              console.log(
+                pc.dim(`  Instance rejected the session (${controlRes.status}), opening as-is`),
+              );
+            }
+          } catch {
+            // fall back to the plain ref URL below
+          }
         }
-        if (opts.unified) {
-          urlParams.set('view', 'unified');
-        }
-        const url = `http://${getHost()}:${existing.port}/diff?${urlParams.toString()}`;
+        const url = `http://${getHost()}:${existing.port}${withViewParams(relUrl)}`;
 
         if (!opts.quiet) {
           console.log('');
           console.log(pc.bold('  diffity'));
-          console.log(`  ${pc.dim('Already running for this repo')}`);
+          console.log(`  ${pc.dim('Reusing the instance already running for this repo')}`);
           console.log('');
           console.log(`  ${pc.green('→')} ${pc.cyan(url)}`);
           console.log('');
@@ -272,23 +302,17 @@ range syntax (main..feature, main...feature) also work.`)
     const port = explicitPort ? parseInt(opts.port, 10) : findAvailablePort();
 
     try {
-      const { port: actualPort, close } = await startServer({
+      const { port: actualPort, sessionUrl, close } = await startServer({
         port,
         portIsExplicit: explicitPort,
         diffArgs,
         description,
         effectiveRef,
+        initialLanes: lanes.length >= 2 ? lanes : undefined,
         version: pkg.version,
         registryInfo: { repoRoot, repoHash, repoName },
       });
-      const urlParams = new URLSearchParams({ ref: effectiveRef });
-      if (opts.dark) {
-        urlParams.set('theme', 'dark');
-      }
-      if (opts.unified) {
-        urlParams.set('view', 'unified');
-      }
-      const url = `http://${getHost()}:${actualPort}/diff?${urlParams.toString()}`;
+      const url = `http://${getHost()}:${actualPort}${withViewParams(sessionUrl)}`;
 
       if (!opts.quiet) {
         console.log('');
@@ -326,6 +350,7 @@ range syntax (main..feature, main...feature) also work.`)
 
 registerOpenCommand(program);
 registerListCommand(program);
+registerSessionsCommand(program);
 registerPruneCommand(program);
 registerUpdateCommand(program, pkg.version, SKILLS_HASH);
 registerDoctorCommand(program, pkg.version);

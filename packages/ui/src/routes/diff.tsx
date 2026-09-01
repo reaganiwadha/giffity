@@ -8,16 +8,28 @@ import { ErrorPage } from "../components/error-page";
 
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const url = new URL(request.url);
-  const ref = url.searchParams.get("ref") || "work";
+  const sessionId = url.searchParams.get("session") || undefined;
   const theme = url.searchParams.get("theme") as "light" | "dark" | null;
   const view = url.searchParams.get("view") as "split" | "unified" | null;
 
-  await Promise.all([
-    queryClient.ensureQueryData(diffOptions(false, ref)),
-    queryClient.ensureQueryData(repoInfoOptions(ref)),
-  ]);
+  let ref = url.searchParams.get("ref") || "work";
 
-  return { ref, theme, view };
+  if (sessionId) {
+    // Resolve the session to its (last-pair) legacy ref up front so the rest of
+    // the diff view keeps working exactly as the ?ref= flow does.
+    const info = await queryClient.ensureQueryData(
+      repoInfoOptions(undefined, sessionId),
+    );
+    ref = info.ref ?? ref;
+    await queryClient.ensureQueryData(diffOptions(false, ref));
+  } else {
+    await Promise.all([
+      queryClient.ensureQueryData(diffOptions(false, ref)),
+      queryClient.ensureQueryData(repoInfoOptions(ref)),
+    ]);
+  }
+
+  return { ref, sessionId, theme, view };
 }
 
 export default function DiffRoute({ loaderData }: Route.ComponentProps) {
@@ -32,8 +44,8 @@ export function ErrorBoundary() {
     <ErrorPage
       error={error}
       actions={[
-        { label: "View working changes", primary: true, onClick: () => navigate("/diff") },
-        { label: "Browse files", onClick: () => navigate("/tree") },
+        { label: "Sessions", primary: true, onClick: () => navigate("/sessions") },
+        { label: "View working changes", onClick: () => navigate("/diff?ref=work") },
       ]}
     />
   );

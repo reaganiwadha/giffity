@@ -26,13 +26,14 @@ export function registerListCommand(program: Command) {
 
       console.log('');
       console.log(
-        `  ${pc.dim('PORT')}   ${pc.dim('PID'.padEnd(8))}${pc.dim('REPO'.padEnd(22))}${pc.dim('REF'.padEnd(22))}${pc.dim('STARTED')}`,
+        `  ${pc.dim('PORT')}   ${pc.dim('PID'.padEnd(8))}${pc.dim('REPO'.padEnd(22))}${pc.dim('SESSION'.padEnd(24))}${pc.dim('STARTED')}`,
       );
 
       for (const entry of entries) {
         const ago = dayjs(entry.startedAt).fromNow();
+        const session = entry.activeSessionName || entry.ref;
         console.log(
-          `  ${String(entry.port).padEnd(7)}${String(entry.pid).padEnd(8)}${entry.repoName.slice(0, 20).padEnd(22)}${entry.ref.slice(0, 20).padEnd(22)}${pc.dim(ago)}`,
+          `  ${String(entry.port).padEnd(7)}${String(entry.pid).padEnd(8)}${entry.repoName.slice(0, 20).padEnd(22)}${session.slice(0, 22).padEnd(24)}${pc.dim(ago)}`,
         );
       }
       console.log('');
